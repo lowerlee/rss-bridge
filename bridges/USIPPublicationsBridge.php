@@ -1,4 +1,13 @@
 <?php
+/**
+ * This file is part of RSS-Bridge, a PHP project capable of generating RSS and
+ * Atom feeds for websites that don't have one.
+ *
+ * For the full license information, please view the UNLICENSE file distributed
+ * with this source code.
+ *
+ * @package RSS-Bridge
+ */
 
 class USIPPublicationsBridge extends BridgeAbstract
 {
@@ -7,7 +16,14 @@ class USIPPublicationsBridge extends BridgeAbstract
     const DESCRIPTION = 'Returns latest publications from United States Institute of Peace';
     const MAINTAINER = 'Your Name';
     const CACHE_TIMEOUT = 3600; // 1 hour
-    
+
+    const TEST_DETECT_PARAMETERS = [
+        'https://www.usip.org/publications?publication_type%5B0%5D=12' => [
+            'context' => 'Publication Type',
+            'type' => '12'
+        ]
+    ];
+
     const PARAMETERS = [
         'Publication Type' => [
             'type' => [
@@ -32,6 +48,10 @@ class USIPPublicationsBridge extends BridgeAbstract
 
         $html = getSimpleHTMLDOM($url);
 
+        if (!$html) {
+            returnServerError('Could not request USIP Publications.');
+        }
+
         $articles = $html->find('article.summary');
 
         foreach ($articles as $article) {
@@ -39,8 +59,10 @@ class USIPPublicationsBridge extends BridgeAbstract
 
             // Get title and URL
             $titleElement = $article->find('h3.summary__heading a', 0);
-            $item['uri'] = 'https://www.usip.org' . $titleElement->href;
-            $item['title'] = $titleElement->plaintext;
+            if ($titleElement) {
+                $item['uri'] = 'https://www.usip.org' . $titleElement->href;
+                $item['title'] = trim($titleElement->plaintext);
+            }
 
             // Get date
             $dateElement = $article->find('span.published-date', 0);
@@ -51,13 +73,13 @@ class USIPPublicationsBridge extends BridgeAbstract
             // Get author
             $authorElement = $article->find('p.meta.publication-by-line a', 0);
             if ($authorElement) {
-                $item['author'] = $authorElement->plaintext;
+                $item['author'] = trim($authorElement->plaintext);
             }
 
             // Get content
             $contentElement = $article->find('div.summary__text p', 0);
             if ($contentElement) {
-                $item['content'] = $contentElement->plaintext;
+                $item['content'] = trim($contentElement->plaintext);
             }
 
             // Get image
@@ -68,6 +90,23 @@ class USIPPublicationsBridge extends BridgeAbstract
 
             $this->items[] = $item;
         }
+    }
+
+    /**
+     * Detects parameters from the URL
+     * @param string $url URL to detect parameters from
+     * @return array|null List of detected parameters or null if detection failed
+     */
+    public function detectParameters($url)
+    {
+        $params = [];
+        $regex = '/publication_type%5B0%5D=([0-9]+)/';
+        if (preg_match($regex, $url, $matches) > 0) {
+            $params['context'] = 'Publication Type';
+            $params['type'] = $matches[1];
+            return $params;
+        }
+        return null;
     }
 
     public function getName()
