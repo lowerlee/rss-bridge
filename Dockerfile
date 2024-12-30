@@ -1,8 +1,8 @@
 FROM debian:12-slim AS rssbridge
 
 LABEL description="RSS-Bridge is a PHP project capable of generating RSS and Atom feeds for websites that don't have one."
-LABEL repository="https://github.com/RSS-Bridge/rss-bridge"
-LABEL website="https://github.com/RSS-Bridge/rss-bridge"
+LABEL repository="https://github.com/lowerlee/rss-bridge"
+LABEL website="https://github.com/lowerlee/rss-bridge"
 
 ARG DEBIAN_FRONTEND=noninteractive
 RUN set -xe && \
