@@ -1,5 +1,4 @@
 <?php
-
 class USIPPublicationsBridge extends BridgeAbstract
 {
     const NAME = 'USIP Publications Bridge';
@@ -37,7 +36,6 @@ class USIPPublicationsBridge extends BridgeAbstract
     public function collectData()
     {
         $html = getSimpleHTMLDOM(self::URI);
-        
         $articles = $html->find('article.summary');
         $limit = $this->getInput('limit') ?: 10;
         $count = 0;
@@ -48,7 +46,6 @@ class USIPPublicationsBridge extends BridgeAbstract
             }
 
             $item = $this->extractArticleData($article);
-            
             if ($item) {
                 $this->items[] = $item;
                 $count++;
