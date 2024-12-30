@@ -6,6 +6,7 @@ class USIPPublicationsBridge extends BridgeAbstract
     const URI = 'https://www.usip.org/publications';
     const DESCRIPTION = 'Returns the latest publications from the United States Institute of Peace';
     const MAINTAINER = 'Your Name';
+    const CACHE_TIMEOUT = 3600; // 1 hour
     const PARAMETERS = [
         'Global' => [
             'limit' => [
@@ -13,8 +14,8 @@ class USIPPublicationsBridge extends BridgeAbstract
                 'type' => 'number',
                 'required' => false,
                 'defaultValue' => 10,
-                'title' => 'Maximum number of publications to return'
-            ]
+                'title' => 'Maximum number of publications to return',
+            ],
         ],
         'By Type' => [
             'type' => [
@@ -26,14 +27,12 @@ class USIPPublicationsBridge extends BridgeAbstract
                     'Question and Answer' => '19171',
                     'Report' => '7',
                     'Peace Brief' => '24',
-                    'Special Report' => '26'
+                    'Special Report' => '26',
                 ],
-                'title' => 'Select publication type'
-            ]
-        ]
+                'title' => 'Select publication type',
+            ],
+        ],
     ];
-
-    const CACHE_TIMEOUT = 3600; // 1 hour
 
     public function collectData()
     {
@@ -48,50 +47,52 @@ class USIPPublicationsBridge extends BridgeAbstract
                 break;
             }
 
-            $item = [];
-
-            // Get title and URL
-            $titleElement = $article->find('h3.summary__heading a', 0);
-            if (!$titleElement) {
-                continue;
-            }
+            $item = $this->extractArticleData($article);
             
-            $item['title'] = $titleElement->plaintext;
-            $item['uri'] = 'https://www.usip.org' . $titleElement->href;
-
-            // Get date
-            $dateElement = $article->find('span.published-date', 0);
-            if ($dateElement) {
-                $item['timestamp'] = strtotime($dateElement->plaintext);
+            if ($item) {
+                $this->items[] = $item;
+                $count++;
             }
-
-            // Get authors
-            $authorElement = $article->find('p.publication-by-line', 0);
-            if ($authorElement) {
-                $item['author'] = trim(str_replace('By:', '', $authorElement->plaintext));
-            }
-
-            // Get content/description
-            $contentElement = $article->find('p', 0);
-            if ($contentElement) {
-                $item['content'] = $contentElement->plaintext;
-            }
-
-            // Get image
-            $imageElement = $article->find('img', 0);
-            if ($imageElement) {
-                $item['enclosures'] = [$imageElement->src];
-            }
-
-            // Get categories (tags)
-            $tagsElement = $article->find('p.tags a', 0);
-            if ($tagsElement) {
-                $item['categories'] = [$tagsElement->plaintext];
-            }
-
-            $this->items[] = $item;
-            $count++;
         }
+    }
+
+    private function extractArticleData($article)
+    {
+        $titleElement = $article->find('h3.summary__heading a', 0);
+        if (!$titleElement) {
+            return null;
+        }
+
+        $item = [];
+        $item['title'] = $titleElement->plaintext;
+        $item['uri'] = 'https://www.usip.org' . $titleElement->href;
+
+        $dateElement = $article->find('span.published-date', 0);
+        if ($dateElement) {
+            $item['timestamp'] = strtotime($dateElement->plaintext);
+        }
+
+        $authorElement = $article->find('p.publication-by-line', 0);
+        if ($authorElement) {
+            $item['author'] = trim(str_replace('By:', '', $authorElement->plaintext));
+        }
+
+        $contentElement = $article->find('p', 0);
+        if ($contentElement) {
+            $item['content'] = $contentElement->plaintext;
+        }
+
+        $imageElement = $article->find('img', 0);
+        if ($imageElement) {
+            $item['enclosures'] = [$imageElement->src];
+        }
+
+        $tagsElement = $article->find('p.tags a', 0);
+        if ($tagsElement) {
+            $item['categories'] = [$tagsElement->plaintext];
+        }
+
+        return $item;
     }
 
     public function getName()
