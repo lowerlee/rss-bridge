@@ -1,5 +1,4 @@
 <?php
-
 class BrookingsBridge extends BridgeAbstract {
     const NAME = 'Brookings Institution Bridge';
     const URI = 'https://www.brookings.edu';
@@ -16,33 +15,12 @@ class BrookingsBridge extends BridgeAbstract {
                 'title' => 'Maximum number of items to return',
                 'defaultValue' => 10
             ]
-        ],
-        'By topic' => [
-            'topic' => [
-                'name' => 'Topic',
-                'type' => 'list',
-                'values' => [
-                    'U.S. Economy' => 'u-s-economy',
-                    'International Affairs' => 'international-affairs',
-                    'Technology & Information' => 'technology-innovation',
-                    'Race in Public Policy' => 'race-in-american-public-policy'
-                ]
-            ]
         ]
     ];
 
     public function collectData() {
         $limit = $this->getInput('limit') ?: 10;
-        $topic = $this->getInput('topic');
-
-        // Build the URL based on parameters
-        $url = self::URI;
-        if ($topic) {
-            $url .= '/topics/' . $topic;
-        } else {
-            $url .= '/research-commentary/';
-        }
-
+        $url = self::URI . '/research-commentary/';
         $html = getSimpleHTMLDOM($url);
 
         // Find article cards/elements
@@ -93,31 +71,7 @@ class BrookingsBridge extends BridgeAbstract {
         }
     }
 
-    public function getName() {
-        $topic = $this->getInput('topic');
-        if ($topic) {
-            $topicName = array_search($topic, self::PARAMETERS['By topic']['topic']['values']);
-            return 'Brookings Institution - ' . $topicName;
-        }
-        return parent::getName();
-    }
-
     public function getURI() {
-        $topic = $this->getInput('topic');
-        if ($topic) {
-            return self::URI . '/topics/' . $topic;
-        }
         return self::URI . '/research-commentary/';
-    }
-
-    public function detectParameters($url) {
-        $regex = '/brookings\.edu\/topics\/([^\/]+)/';
-        if (preg_match($regex, $url, $matches) > 0) {
-            return [
-                'context' => 'By topic',
-                'topic' => $matches[1]
-            ];
-        }
-        return null;
     }
 }
