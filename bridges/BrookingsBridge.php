@@ -1,77 +1,84 @@
 <?php
+
 class BrookingsBridge extends BridgeAbstract {
     const NAME = 'Brookings Institution Bridge';
     const URI = 'https://www.brookings.edu';
     const DESCRIPTION = 'Returns latest research and commentary from Brookings Institution';
     const MAINTAINER = 'Your GitHub Username';
-    const CACHE_TIMEOUT = 3600; // 1 hour cache
-
-    const PARAMETERS = [
-        'Global' => [
-            'limit' => [
-                'name' => 'Limit',
-                'type' => 'number',
-                'required' => false,
-                'title' => 'Maximum number of items to return',
-                'defaultValue' => 10
-            ]
-        ]
-    ];
+    const CACHE_TIMEOUT = 3600;
 
     public function collectData() {
-        $limit = $this->getInput('limit') ?: 10;
-        $url = self::URI . '/research-commentary/';
-        $html = getSimpleHTMLDOM($url);
+        // Get main page
+        $html = getSimpleHTMLDOM(self::URI . '/research-commentary/');
 
-        // Find article cards/elements
-        $articles = $html->find('article.article-nav');
-        $articles = array_slice($articles, 0, $limit);
-
-        foreach ($articles as $article) {
+        // Find all articles
+        foreach($html->find('article.article-nav') as $article) {
             $item = [];
-
-            // Get article link and title
+            
+            // Get link and title
             $link = $article->find('a.overlay-link', 0);
             $item['uri'] = $link->href;
             $item['title'] = trim($link->find('span.sr-only', 0)->plaintext);
 
-            // Get thumbnail image if available
-            $image = $article->find('img', 0);
-            if ($image) {
-                $imageUrl = $image->src;
-                $item['enclosures'] = [$imageUrl];
-                $item['content'] = '<img src="' . $imageUrl . '" alt="' . $image->alt . '"/><br/>';
+            // Fetch full article
+            $fullArticle = getSimpleHTMLDOM($item['uri']);
+            if (!$fullArticle) {
+                continue;
             }
 
-            // Get author if available
-            $author = $article->find('span.author', 0);
-            if ($author) {
-                $item['author'] = trim($author->plaintext);
+            // Build content from wysiwyg blocks
+            $content = '';
+
+            // Get editor's note if exists
+            $editorNote = $fullArticle->find('div.editors-note', 0);
+            if ($editorNote) {
+                $content .= '<div class="editors-note">' . $editorNote->innertext . '</div>';
             }
 
-            // Get date if available
-            $date = $article->find('time', 0);
+            // Get main article content blocks
+            foreach($fullArticle->find('div[class*="byo-block -narrow wysiwyg-block wysiwyg"]') as $block) {
+                // Skip blocks with layout styling classes
+                if (strpos($block->class, 'border-t') !== false || 
+                    strpos($block->class, 'medium') !== false || 
+                    strpos($block->class, 'author-row') !== false) {
+                    continue;
+                }
+                $content .= $block->innertext;
+            }
+
+            // Get any images
+            $imageBlock = $fullArticle->find('div[class*="byo-block -wide -medium image-block"]', 0);
+            if ($imageBlock) {
+                $image = $imageBlock->find('img', 0);
+                if ($image) {
+                    $imageUrl = urljoin(self::URI, $image->src);
+                    $item['enclosures'] = [$imageUrl];
+                    $content = '<img src="' . $imageUrl . '" alt="' . ($image->alt ?? '') . '"/><br/>' . $content;
+                }
+            }
+
+            $item['content'] = $content;
+
+            // Get author info
+            $authorBlock = $fullArticle->find('div.author-row', 0);
+            if ($authorBlock) {
+                $authorName = $authorBlock->find('span.author-name', 0);
+                if ($authorName) {
+                    $item['author'] = trim($authorName->plaintext);
+                }
+            }
+
+            // Get date from published metadata
+            $date = $fullArticle->find('meta[property="article:published_time"]', 0);
             if ($date) {
-                $item['timestamp'] = strtotime($date->datetime);
-            }
-
-            // Get description/excerpt if available
-            $excerpt = $article->find('p.description', 0);
-            if ($excerpt) {
-                $item['content'] = ($item['content'] ?? '') . trim($excerpt->plaintext);
-            }
-
-            // Get categories/topics if available
-            $topics = $article->find('span.topic', 0);
-            if ($topics) {
-                $item['categories'] = array_map('trim', explode(',', $topics->plaintext));
+                $item['timestamp'] = strtotime($date->content);
             }
 
             $this->items[] = $item;
         }
     }
 
-    public function getURI() {
-        return self::URI . '/research-commentary/';
+    public function getName() {
+        return self::NAME;
     }
 }
