@@ -1,5 +1,4 @@
 <?php
-
 class BrookingsBridge extends BridgeAbstract {
     const NAME = 'Brookings Institution Bridge';
     const URI = 'https://www.brookings.edu';
@@ -7,9 +6,45 @@ class BrookingsBridge extends BridgeAbstract {
     const MAINTAINER = 'Your GitHub Username';
     const CACHE_TIMEOUT = 3600;
 
+    private function getPage($url) {
+        $opts = [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            CURLOPT_ENCODING => '',
+            CURLOPT_HTTPHEADER => [
+                'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language: en-US,en;q=0.5',
+                'Connection: keep-alive',
+                'Upgrade-Insecure-Requests: 1',
+                'Sec-Fetch-Dest: document',
+                'Sec-Fetch-Mode: navigate',
+                'Sec-Fetch-Site: none',
+                'Sec-Fetch-User: ?1',
+                'Cache-Control: max-age=0'
+            ]
+        ];
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, $opts);
+        $data = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($httpCode !== 200) {
+            returnClientError('Error ' . $httpCode . ' when fetching ' . $url);
+            return null;
+        }
+
+        return str_get_html($data);
+    }
+
     public function collectData() {
-        // Get main page
-        $html = getSimpleHTMLDOM(self::URI . '/research-commentary/');
+        $html = $this->getPage(self::URI . '/research-commentary/');
+        if (!$html) {
+            returnServerError('Unable to get main page');
+            return;
+        }
 
         // Find all articles
         foreach($html->find('article.article-nav') as $article) {
@@ -20,8 +55,8 @@ class BrookingsBridge extends BridgeAbstract {
             $item['uri'] = $link->href;
             $item['title'] = trim($link->find('span.sr-only', 0)->plaintext);
 
-            // Fetch full article
-            $fullArticle = getSimpleHTMLDOM($item['uri']);
+            // Fetch full article with proper headers
+            $fullArticle = $this->getPage($item['uri']);
             if (!$fullArticle) {
                 continue;
             }
@@ -76,9 +111,5 @@ class BrookingsBridge extends BridgeAbstract {
 
             $this->items[] = $item;
         }
-    }
-
-    public function getName() {
-        return self::NAME;
     }
 }
