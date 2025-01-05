@@ -32,15 +32,18 @@ class ACLEDBridge extends BridgeAbstract {
     const CACHE_TIMEOUT = 3600; // 1 hour
 
     public function collectData() {
-        $limit = $this->getInput('limit') ?: 10;
-        $category = $this->getInput('category');
+        $limit = intval($this->getInput('limit')) ?: 10;
+        $category = trim($this->getInput('category'));
         
         $url = 'https://acleddata.com/analysis-search/';
         if ($category) {
-            $url .= '?_sft_category=' . $category;
+            $url .= '?_sft_category=' . urlencode($category);
         }
 
         $html = getSimpleHTMLDOM($url);
+        if (!$html) {
+            throw new \Exception('Failed to load ACLED website');
+        }
 
         $posts = $html->find('div.analysis-result');
         $count = 0;
@@ -54,44 +57,68 @@ class ACLEDBridge extends BridgeAbstract {
 
             // Get title and URL
             $titleLink = $post->find('h2 a', 0);
+            if (!$titleLink) {
+                continue; // Skip if no title found
+            }
             $item['uri'] = $titleLink->href;
-            $item['title'] = $titleLink->plaintext;
+            $item['title'] = trim($titleLink->plaintext);
 
             // Get date
             $date = $post->find('p.date', 0);
             if ($date) {
-                $item['timestamp'] = strtotime($date->plaintext);
+                try {
+                    $item['timestamp'] = strtotime($date->plaintext);
+                } catch (\Exception $e) {
+                    $item['timestamp'] = time(); // Fallback to current time
+                }
             }
 
-            // Get content from the excerpt paragraph inside div.analysis-result
-            $content = $post->find('p p', 0); // Get the excerpt specifically
-            $item['content'] = $content ? $content->plaintext : '';
+            // Get content from the excerpt paragraph
+            $content = $post->find('p p', 0);
+            $item['content'] = $content ? trim($content->plaintext) : '';
 
             // Get categories
             $categories = [];
             $categoryElements = $post->find('ul.post-categories li a');
             foreach ($categoryElements as $cat) {
-                $categories[] = $cat->plaintext;
+                $categories[] = trim($cat->plaintext);
             }
             $item['categories'] = $categories;
 
+            // Get author if available
+            $author = $post->find('span.author', 0);
+            if ($author) {
+                $item['author'] = trim($author->plaintext);
+            }
+
             // Get thumbnail if available
-            $image = $post->find('img.wp-post-image', 0);  // More specific selector for the main image
+            $image = $post->find('img.wp-post-image', 0);
             if ($image) {
-                $item['enclosures'] = [$image->getAttribute('src')];
-                // Add image metadata to content
-                $alt = $image->getAttribute('alt');
-                $srcset = $image->getAttribute('srcset');
-                $item['content'] = '<p><img src="' . $image->getAttribute('src') . '" 
-                                      alt="' . htmlspecialchars($alt) . '" 
-                                      srcset="' . htmlspecialchars($srcset) . '" /></p>' 
-                                  . $item['content'];
+                $imgSrc = $image->getAttribute('src');
+                if ($imgSrc) {
+                    $item['enclosures'] = [$imgSrc];
+                    
+                    // Add image metadata to content
+                    $alt = $image->getAttribute('alt') ?: '';
+                    $srcset = $image->getAttribute('srcset') ?: '';
+                    $item['content'] = sprintf(
+                        '<p><img src="%s" alt="%s" srcset="%s" /></p>%s',
+                        htmlspecialchars($imgSrc),
+                        htmlspecialchars($alt),
+                        htmlspecialchars($srcset),
+                        $item['content']
+                    );
+                }
             }
 
             // Add "Read More" link to content
             $readMore = $post->find('a.readmore-link', 0);
             if ($readMore) {
-                $item['content'] .= '<p><a href="' . $readMore->href . '">Read More</a></p>';
+                $item['content'] .= sprintf(
+                    '<p><a href="%s">Read More</a></p>',
+                    htmlspecialchars($readMore->href)
+                );
+            }
 
             $this->items[] = $item;
             $count++;
@@ -118,7 +145,7 @@ class ACLEDBridge extends BridgeAbstract {
         $uri = self::URI;
         
         if ($category) {
-            $uri .= '/category/' . $category;
+            $uri .= '/category/' . urlencode($category);
         }
         
         return $uri;
@@ -129,8 +156,12 @@ class ACLEDBridge extends BridgeAbstract {
         
         // Check if URL matches a category
         if (preg_match('/acleddata\.com\/category\/([^\/]+)/', $url, $matches)) {
-            $params['category'] = $matches[1];
-            return $params;
+            $category = $matches[1];
+            // Validate that the category exists
+            if (in_array($category, self::PARAMETERS['Global']['category']['values'])) {
+                $params['category'] = $category;
+                return $params;
+            }
         }
         
         return null;
