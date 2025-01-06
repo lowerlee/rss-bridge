@@ -1,10 +1,8 @@
 <?php
-
 class ACLEDBridge extends BridgeAbstract {
-
     const NAME = 'ACLED Bridge';
     const URI = 'https://acleddata.com';
-    const DESCRIPTION = 'Returns the latest analysis posts from ACLED (Armed Conflict Location & Event Data Project)';
+    const DESCRIPTION = 'Returns ACLED analysis articles with full content';
     const MAINTAINER = 'Your Name';
     const PARAMETERS = [
         'Global' => [
@@ -29,22 +27,23 @@ class ACLEDBridge extends BridgeAbstract {
             ]
         ]
     ];
-    const CACHE_TIMEOUT = 3600; // 1 hour
+    const CACHE_TIMEOUT = 3600;
+
+    public function getIcon() {
+        return 'https://acleddata.com/acleddatanew/wp-content/uploads/2019/10/acled-favi.png';
+    }
 
     public function collectData() {
-        $limit = intval($this->getInput('limit')) ?: 10;
-        $category = trim($this->getInput('category'));
+        $limit = $this->getInput('limit') ?: 10;
+        $category = $this->getInput('category');
         
+        // Get list of articles from search page
         $url = 'https://acleddata.com/analysis-search/';
         if ($category) {
-            $url .= '?_sft_category=' . urlencode($category);
+            $url .= '?_sft_category=' . $category;
         }
 
         $html = getSimpleHTMLDOM($url);
-        if (!$html) {
-            throw new \Exception('Failed to load ACLED website');
-        }
-
         $posts = $html->find('div.analysis-result');
         $count = 0;
 
@@ -53,71 +52,96 @@ class ACLEDBridge extends BridgeAbstract {
                 break;
             }
 
+            // Get article URL
+            $articleUrl = $post->find('h2 a', 0)->href;
+            
+            // Fetch and parse full article
+            $articleHtml = getSimpleHTMLDOM($articleUrl);
             $item = [];
 
-            // Get title and URL
-            $titleLink = $post->find('h2 a', 0);
-            if (!$titleLink) {
-                continue; // Skip if no title found
-            }
-            $item['uri'] = $titleLink->href;
-            $item['title'] = trim($titleLink->plaintext);
-
-            // Get date
-            $date = $post->find('p.date', 0);
-            if ($date) {
-                try {
-                    $item['timestamp'] = strtotime($date->plaintext);
-                } catch (\Exception $e) {
-                    $item['timestamp'] = time(); // Fallback to current time
-                }
+            // Title
+            $item['title'] = $articleHtml->find('title', 0)->plaintext;
+            
+            // URL
+            $item['uri'] = $articleHtml->find('link[rel=canonical]', 0)->href;
+            
+            // Publication Date
+            $dateElement = $articleHtml->find('time.entry-date', 0);
+            if ($dateElement) {
+                $item['timestamp'] = strtotime($dateElement->datetime);
             }
 
-            // Get content from the excerpt paragraph
-            $content = $post->find('p p', 0);
-            $item['content'] = $content ? trim($content->plaintext) : '';
+            // Authors
+            $authors = [];
+            foreach ($articleHtml->find('div.author-info') as $authorDiv) {
+                $authorName = $authorDiv->find('.author-heading', 0)->plaintext;
+                $authorUrl = $authorDiv->find('h4 a', 0)->href;
+                $authorBio = $authorDiv->find('.author-bio', 0)->plaintext;
+                $authors[] = [
+                    'name' => $authorName,
+                    'url' => $authorUrl,
+                    'bio' => $authorBio
+                ];
+            }
+            $item['author'] = implode(', ', array_column($authors, 'name'));
 
-            // Get categories
+            // Categories
             $categories = [];
-            $categoryElements = $post->find('ul.post-categories li a');
-            foreach ($categoryElements as $cat) {
-                $categories[] = trim($cat->plaintext);
+            foreach ($articleHtml->find('span.category-link a') as $category) {
+                $categories[] = $category->plaintext;
             }
             $item['categories'] = $categories;
 
-            // Get author if available
-            $author = $post->find('span.author', 0);
-            if ($author) {
-                $item['author'] = trim($author->plaintext);
+            // Region
+            $regionElement = $articleHtml->find('div.region-meta-single a', 0);
+            if ($regionElement) {
+                $item['region'] = $regionElement->plaintext;
             }
 
-            // Get thumbnail if available
-            $image = $post->find('img.wp-post-image', 0);
-            if ($image) {
-                $imgSrc = $image->getAttribute('src');
-                if ($imgSrc) {
-                    $item['enclosures'] = [$imgSrc];
-                    
-                    // Add image metadata to content
-                    $alt = $image->getAttribute('alt') ?: '';
-                    $srcset = $image->getAttribute('srcset') ?: '';
-                    $item['content'] = sprintf(
-                        '<p><img src="%s" alt="%s" srcset="%s" /></p>%s',
-                        htmlspecialchars($imgSrc),
-                        htmlspecialchars($alt),
-                        htmlspecialchars($srcset),
-                        $item['content']
-                    );
+            // Tags
+            $tags = [];
+            foreach ($articleHtml->find('div.entry-tags a') as $tag) {
+                $tags[] = $tag->plaintext;
+            }
+            $item['tags'] = $tags;
+
+            // Content
+            $content = $articleHtml->find('div.entry-content', 0);
+            
+            // Clean up content
+            foreach ($content->find('script, style, .printfriendly') as $remove) {
+                $remove->outertext = '';
+            }
+
+            // Add metadata section
+            $metadata = "<div class='article-metadata'>";
+            if (isset($item['region'])) {
+                $metadata .= "<p><strong>Region:</strong> {$item['region']}</p>";
+            }
+            if (!empty($item['categories'])) {
+                $metadata .= "<p><strong>Categories:</strong> " . implode(', ', $item['categories']) . "</p>";
+            }
+            if (!empty($item['tags'])) {
+                $metadata .= "<p><strong>Tags:</strong> " . implode(', ', $item['tags']) . "</p>";
+            }
+            if (!empty($authors)) {
+                $metadata .= "<div class='authors'>";
+                foreach ($authors as $author) {
+                    $metadata .= "<div class='author'>";
+                    $metadata .= "<p><strong><a href='{$author['url']}'>{$author['name']}</a></strong></p>";
+                    $metadata .= "<p>{$author['bio']}</p>";
+                    $metadata .= "</div>";
                 }
+                $metadata .= "</div>";
             }
+            $metadata .= "</div><hr>";
 
-            // Add "Read More" link to content
-            $readMore = $post->find('a.readmore-link', 0);
-            if ($readMore) {
-                $item['content'] .= sprintf(
-                    '<p><a href="%s">Read More</a></p>',
-                    htmlspecialchars($readMore->href)
-                );
+            $item['content'] = $metadata . $content->innertext;
+
+            // Get featured image
+            $featuredImage = $post->find('img.wp-post-image', 0);
+            if ($featuredImage) {
+                $item['enclosures'] = [$featuredImage->getAttribute('src')];
             }
 
             $this->items[] = $item;
@@ -141,14 +165,7 @@ class ACLEDBridge extends BridgeAbstract {
     }
 
     public function getURI() {
-        $category = $this->getInput('category');
-        $uri = self::URI;
-        
-        if ($category) {
-            $uri .= '/category/' . urlencode($category);
-        }
-        
-        return $uri;
+        return self::URI;
     }
 
     public function detectParameters($url) {
@@ -156,12 +173,8 @@ class ACLEDBridge extends BridgeAbstract {
         
         // Check if URL matches a category
         if (preg_match('/acleddata\.com\/category\/([^\/]+)/', $url, $matches)) {
-            $category = $matches[1];
-            // Validate that the category exists
-            if (in_array($category, self::PARAMETERS['Global']['category']['values'])) {
-                $params['category'] = $category;
-                return $params;
-            }
+            $params['category'] = $matches[1];
+            return $params;
         }
         
         return null;
