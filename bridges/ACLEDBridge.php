@@ -113,35 +113,74 @@ class ACLEDBridge extends BridgeAbstract {
                 $remove->outertext = '';
             }
 
-            // Add metadata section
-            $metadata = "<div class='article-metadata'>";
+            // Add metadata section with improved formatting
+            $metadata = "<div class='article-metadata' style='margin-bottom: 20px; padding: 15px; background: #f5f5f5; border-left: 3px solid #004f6d;'>";
+            
+            // Region, Categories, Tags
             if (isset($item['region'])) {
-                $metadata .= "<p><strong>Region:</strong> {$item['region']}</p>";
+                $metadata .= "<p style='margin: 5px 0'><strong>Region:</strong> {$item['region']}</p>";
             }
             if (!empty($item['categories'])) {
-                $metadata .= "<p><strong>Categories:</strong> " . implode(', ', $item['categories']) . "</p>";
+                $metadata .= "<p style='margin: 5px 0'><strong>Categories:</strong> " . implode(', ', $item['categories']) . "</p>";
             }
             if (!empty($item['tags'])) {
-                $metadata .= "<p><strong>Tags:</strong> " . implode(', ', $item['tags']) . "</p>";
+                $metadata .= "<p style='margin: 5px 0'><strong>Tags:</strong> " . implode(', ', $item['tags']) . "</p>";
             }
+            
+            // Authors section
             if (!empty($authors)) {
-                $metadata .= "<div class='authors'>";
+                $metadata .= "<div class='authors' style='margin-top: 15px'>";
                 foreach ($authors as $author) {
-                    $metadata .= "<div class='author'>";
-                    $metadata .= "<p><strong><a href='{$author['url']}'>{$author['name']}</a></strong></p>";
-                    $metadata .= "<p>{$author['bio']}</p>";
+                    $metadata .= "<div class='author' style='margin-bottom: 15px'>";
+                    $metadata .= "<p style='margin: 5px 0; color: #004f6d;'><strong>{$author['name']}</strong></p>";
+                    $metadata .= "<p style='margin: 5px 0; font-size: 0.95em;'>{$author['bio']}</p>";
                     $metadata .= "</div>";
                 }
                 $metadata .= "</div>";
             }
-            $metadata .= "</div><hr>";
+            
+            $metadata .= "</div>"; // No need for hr with styled container
 
-            $item['content'] = $metadata . $content->innertext;
+            // Process footnotes if they exist
+            $footnotes = $articleHtml->find('.modern-footnotes-footnote');
+            if ($footnotes) {
+                $footnotesHtml = "<div class='footnotes' style='margin-top: 30px; padding-top: 20px; border-top: 1px solid #ccc;'>";
+                $footnotesHtml .= "<h3>References</h3><ol>";
+                foreach ($footnotes as $footnote) {
+                    $id = $footnote->getAttribute('data-footnote-id');
+                    $text = $footnote->find('.modern-footnotes-footnote__note', 0)->innertext;
+                    $footnotesHtml .= "<li id='footnote-$id'>$text</li>";
+                }
+                $footnotesHtml .= "</ol></div>";
+                
+                $item['content'] = $metadata . $content->innertext . $footnotesHtml;
+            } else {
+                $item['content'] = $metadata . $content->innertext;
+            }
 
-            // Get featured image
+            // Handle lazy-loaded images
             $featuredImage = $post->find('img.wp-post-image', 0);
             if ($featuredImage) {
-                $item['enclosures'] = [$featuredImage->getAttribute('src')];
+                // Check for lazy-loaded images with data-lazy-src attribute
+                $imgSrc = $featuredImage->getAttribute('data-lazy-src');
+                if (!$imgSrc) {
+                    // If not lazy-loaded, use regular src
+                    $imgSrc = $featuredImage->getAttribute('src');
+                }
+                // Clean up placeholder SVG URLs
+                if (strpos($imgSrc, 'data:image/svg+xml') === false) {
+                    $item['enclosures'] = [$imgSrc];
+                }
+            }
+
+            // Also fix lazy-loaded images in content
+            $contentImages = $content->find('img[data-lazy-src]');
+            foreach ($contentImages as $img) {
+                $realSrc = $img->getAttribute('data-lazy-src');
+                if ($realSrc) {
+                    $img->setAttribute('src', $realSrc);
+                    $img->removeAttribute('data-lazy-src');
+                }
             }
 
             $this->items[] = $item;
